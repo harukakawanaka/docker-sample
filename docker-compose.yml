@@ -1,0 +1,48 @@
+version: "3"
+services:
+  # データーベース
+  mysql:
+    build:
+      context: ./mysql
+      dockerfile: Dockerfile
+    image: mysql:5.6.42-custom
+    container_name: mysql_host
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: database_name
+      MYSQL_USER: cubic
+      MYSQL_PASSWORD: password
+      TZ: 'Asia/Tokyo'
+    command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+    - ./db/data:/var/lib/mysql
+    - ./db/my.cnf:/etc/mysql/conf.d/my.cnf
+    - ./db/sql:/docker-entrypoint-initdb.d
+    ports:
+    - 3306:3306
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: debian:stretch-slim-cunstom
+    container_name: web_host
+    depends_on:
+      - mysql
+    volumes:
+      - ./html:/var/www/html
+    ports:
+      - 8080:8000
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    environment:
+      - PMA_ARBITRARY=1
+      - PMA_HOST=mysql
+      - PMA_USER=cubic
+      - PMA_PASSWORD=password
+    links:
+      - mysql
+    ports:
+      - 4040:80
+    volumes:
+      - ./phpmyadmin/sessions:/sessions

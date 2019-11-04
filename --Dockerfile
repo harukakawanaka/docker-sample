@@ -1,0 +1,129 @@
+# Docker ベスト・プラクティス
+# 不要なパッケージのインストールを避ける
+# コンテナ毎に１つのプロセスだけ実行
+# レイヤの数を最小に
+# 複数行の引数
+
+# コメント以外の最初に書く行はFrom。
+# From ベース・イメージ（base image）親イメージを持たないイメージを、 ベース・イメージ と呼びます。
+# |- Docker では debian を推奨している。
+# |- Ex:)
+#     |- FROM <イメージ> or
+#     |- FROM <イメージ>:<タグ>
+#     |- FROM <イメージ>@<digest>
+# タグ または <digest> はオプションであり、省略時は latest とみなされる。
+FROM debian:stretch-slim
+
+# Run
+# |- ２種類の形式がある。
+#     |- 1. Run <コマンド> (シェル形式、コマンドを実行する。Linux 上のデフォルトは /bin/sh -c であり、Windows 上 cmd /S /C ）
+#     |- 2. RUN ["実行バイナリ", "パラメータ１", "パラメータ２"] （ exec 形式）
+# |- オプション
+#     |- e: エラーがあったら処理を終了する。
+#     |- u: 未定義の変数に対して読み込み等を行おうとした際にエラーにする。
+#     |- x: 実行ログ
+
+# シェルスクリプト
+# {}はシェルスクリプト内で、変数を展開するのに使用する。
+# DebianのPHPパッケージがインストールされないようにします
+# 
+RUN set -eux; \
+    { \
+        echo 'Package: php*'; \
+        echo 'Pin: release *'; \
+        echo 'Pin-Priority: -1'; \
+    } > /etc/apt/preferences.d/no-debian-php
+
+# 「phpize」の実行に必要な依存関係
+#     phpizeとは拡張モジュールをビルドする低レベルなビルドツール。
+#     autoconfやautomake m4等のビルドツールが別途必要になる。
+#     これを使用することにより、PHPをソースから再コンパイルすることなく拡張モジュールをビルドすることができる。
+
+# モジュールの説明
+# autoconf（configureというパッケージインストールスクリプトを作成するためのパッケージ）
+# dpkg-dev（APTより低水準なdebianのパッケージ管理システム）
+# file（ファイルの形式などを調べるfileコマンド）
+# g++（C++ コンパイラ）
+# gcc（C コンパイラ）
+# libc-dev（C言語 標準ライブラリ
+# make（Makefileというファイルを基にコンパイルを行うツール）
+# pkg-config（コンパイルする際に必要なライブラリの情報を取得するツール）
+# re2c（CとC++のための字句解析ツール）
+
+# EVN
+#    コンテナ化されたサービスが必要な環境変数を指定する
+ENV PHPIZE_DEPS \
+        autoconf \
+        dpkg-dev \
+        file \
+        g++ \
+        gcc \
+        libc-dev \
+        make \
+        pkg-config \
+        re2c
+
+# パッケージのインストール
+#     |- apt-get update(インストール可能なパッケージリストを更新) して、
+#        apt-get install -y(成功したら列挙するパッケージをインストール)する。
+#           |- update
+#                |- /etc/apt/sources.listに書かれているURLから
+#                   インストール可能なパッケージを/var/lib/apt/listsに保存する。
+#           |- yオプション: インストールするかどうかの確認を省略。
+#           |- --no-install-recommendsオプション: おすすめパッケージはインストールしない。
+#           |- rm -r /var/lib/apt/lists/* 
+#                |- apt-get updateで追加されたファイルの削除
+
+# インストールしたパッケージの説明
+# ca-certificates（認証局（CA：Certification Authority）の証明書などを含んだパッケージ）
+# curl（httpを始めとした様々なプロトコルで通信を行うためのツール）
+# xz-utils（xzという圧縮フォーマットのファイルを作成・展開するためのツール）
+RUN apt-get update && apt-get install -y \
+        $PHPIZE_DEPS \
+        ca-certificates \
+        curl \
+        xz-utils \
+    --no-install-recommends && rm -r /var/lib/apt/lists/*
+
+# php.iniファイルの作成するディレクトリを作成する。
+ENV PHP_INI_DIR /usr/local/etc/php
+RUN mkdir -p $PHP_INI_DIR/conf.d
+
+# apache2 を 更新してインストールしてお片付け
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends \
+		apache2 \
+	&& rm -rf /var/lib/apt/lists/*
+
+# なんか環境変数をセットしてる？
+ENV APACHE_CONFDIR /etc/apache2
+ENV APACHE_ENVVARS $APACHE_CONFDIR/envvars
+
+# sed コマンド
+#    |- rオプション: 拡張正規表現を使う。
+#    |- iオプション: 結果を標準出力せずにファイルを置き換える。
+
+# APACHE_ENVVARS (環境変数)になんかセットしてる
+# ディレクトリをセットして適切にパーミッションを設定している。
+# . 〜〜で今のシェル上でスクリプトを実行する
+
+RUN set -eux; \
+	sed -ri 's/^export ([^=]+)=(.*)$/: ${\1:=\2}\nexport \1/' "$APACHE_ENVVARS"; \
+	. "$APACHE_ENVVARS"; \
+	for dir in \
+		"$APACHE_LOCK_DIR" \
+		"$APACHE_RUN_DIR" \
+		"$APACHE_LOG_DIR" \
+		/var/www/html \
+	; do \
+		rm -rvf "$dir"; \
+		mkdir -p "$dir"; \
+		chown "$APACHE_RUN_USER:$APACHE_RUN_GROUP" "$dir"; \
+		chmod 777 "$dir"; \
+	done; \
+	\
+# logs should go to stdout / stderr
+	ln -sfT /dev/stderr "$APACHE_LOG_DIR/error.log"; \
+	ln -sfT /dev/stdout "$APACHE_LOG_DIR/access.log"; \
+	ln -sfT /dev/stdout "$APACHE_LOG_DIR/other_vhosts_access.log"; \
+	chown -R --no-dereference "$APACHE_RUN_USER:$APACHE_RUN_GROUP" "$APACHE_LOG_DIR"
