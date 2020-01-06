@@ -10,3 +10,6 @@
 > 書き方の例
 >
 > @harukakawanaka 
+
+# 書き方ガイド
+[CONTRIBUTING](https://github.com/harukakawanaka/docker-sample/blob/master/.github/CONTRIBUTING.md) を参照してください。
