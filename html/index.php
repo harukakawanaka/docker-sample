@@ -1,2 +1,3 @@
 <?php
+// hoge
 phpinfo();
